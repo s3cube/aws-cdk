@@ -257,7 +257,14 @@ function makeIdentifier(s: string) {
 export function sanitizeTypeName(name: string): string {
   const id = makeIdentifier(camelcase(name, { pascalCase: true }));
 
-  return RESERVED_NAMES_LIST.has(id) ? `${id}Type` : id;
+  return RESERVED_TYPE_NAMES_LIST.has(id) ? `${id}Type` : id;
 }
 
-const RESERVED_NAMES_LIST = new Set(['Object']);
+export function santitizeFieldName(name: string): string {
+  return RESERVED_FIELD_NAMES_LIST.has(name) ? `${name}Property` : name;
+}
+
+const RESERVED_TYPE_NAMES_LIST = new Set(['Object', 'Tag', 'Math']);
+
+const RESERVED_FIELD_NAMES_LIST = new Set(['build']);
+
