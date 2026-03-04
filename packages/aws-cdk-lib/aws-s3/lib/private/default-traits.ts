@@ -9,12 +9,13 @@ import type {
   IResourceWithPolicyV2,
   PolicyStatement,
 } from '../../../aws-iam';
-import { DefaultEncryptedResourceFactories, DefaultPolicyFactories, PolicyDocument } from '../../../aws-iam';
+import { DefaultEncryptedResourceFactories, DefaultPolicyFactories } from '../../../aws-iam';
 import type { CfnKey } from '../../../aws-kms';
 import { KeyGrants } from '../../../aws-kms';
 import type { CfnResource, ResourceEnvironment } from '../../../core';
-import { ValidationError } from '../../../core';
+import { Reference, Tokenization, ValidationError } from '../../../core';
 import { findClosestRelatedResource, findL1FromRef } from '../../../core/lib/helpers-internal';
+import { BucketPolicyStatements } from '../mixins/bucket-policy';
 import type { IBucketRef } from '../s3.generated';
 import { CfnBucket, CfnBucketPolicy } from '../s3.generated';
 
@@ -54,7 +55,6 @@ class BucketWithPolicyFactory implements IResourcePolicyFactory {
 class CfnBucketWithPolicy implements IResourceWithPolicyV2 {
   public readonly env: ResourceEnvironment;
   private policy?: CfnBucketPolicy;
-  private policyDocument?: PolicyDocument;
 
   constructor(private readonly bucket: CfnBucket) {
     this.env = bucket.env;
@@ -62,18 +62,13 @@ class CfnBucketWithPolicy implements IResourceWithPolicyV2 {
 
   public addToResourcePolicy(statement: PolicyStatement): AddToResourcePolicyResult {
     if (!this.policy) {
-      this.policy = new CfnBucketPolicy(this.bucket, 'S3BucketPolicy', {
+      this.policy = tryFindBucketPolicyForBucket(this.bucket) ?? new CfnBucketPolicy(this.bucket, 'S3BucketPolicy', {
         bucket: this.bucket.ref,
         policyDocument: { Statement: [] },
       });
     }
 
-    if (!this.policyDocument) {
-      this.policyDocument = PolicyDocument.fromJson(this.policy.policyDocument ?? { Statement: [] });
-    }
-
-    this.policyDocument.addStatements(statement);
-    this.policy.policyDocument = this.policyDocument.toJSON();
+    this.policy.with(new BucketPolicyStatements([statement]));
 
     return { statementAdded: true, policyDependable: this.policy };
   }
@@ -110,6 +105,30 @@ function tryFindBucketConstruct(bucket: IBucketRef): CfnBucket | undefined {
     bucket,
     'AWS::S3::Bucket',
     (cfn, ref) => ref.bucketRef == cfn.bucketRef,
+  );
+}
+
+/**
+ * Attempts to find an existing bucket policy for the specified S3 bucket.
+ * Finds the closest matching policy to the specified bucket.
+ *
+ * @param bucket - The S3 bucket reference to search for an associated bucket policy
+ * @returns The bucket policy if found, undefined otherwise
+ */
+function tryFindBucketPolicyForBucket(bucket: IBucketRef): CfnBucketPolicy | undefined {
+  return findClosestRelatedResource<IBucketRef, CfnBucketPolicy>(
+    bucket,
+    'AWS::S3::BucketPolicy',
+    (b: any, policy) => {
+      const reversed = Tokenization.reverse(policy.bucket) || policy.bucket;
+      if (Reference.isReference(reversed)) {
+        if (b === reversed.target) {
+          return true;
+        }
+      }
+      const possibleRefs = new Set([b.ref, b.bucketName, b.bucketArn, b.bucketRef?.bucketName, b.bucketRef?.bucketArn].filter(Boolean));
+      return possibleRefs.has(reversed) || String(reversed).includes(b.node.id);
+    },
   );
 }
 
